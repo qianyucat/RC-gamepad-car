@@ -1,6 +1,6 @@
 <template>
     <xbox :gamepad="gamepad"></xbox>
-  <!-- <ul>
+  <ul>
     <li v-for="(value, key) in gamepad.axes">
       {{ key }}: {{ value }}
     </li>
@@ -10,7 +10,8 @@
       {{ key }}: {{ "pressed：" + value.pressed + " touched：" + value.touched + " value：" + value.value
       }}
     </li>
-  </ul> -->
+    {{ gamepad.throttle }}
+  </ul>
 
 </template>
 <script>
@@ -33,10 +34,11 @@ export default {
           'Back', 'Start', 'Left-Click', 'Right-Click',
           'DPad-Up', 'DPad-Down', 'DPad-Left', 'DPad-Right'
         ],
-        forward: true,
+        throttle: 0.5,
+        ch3: false,
         mqttConnected: false
       },
-      rcCarID: "98:F4:AB:B3:30:31",
+      rcCarID: "rc-gamepad-car",
       connection: {
         protocol: "ws",
         host: "192.168.31.12",
@@ -78,8 +80,14 @@ export default {
       handler(newButton, oldButton) {
         if(oldButton) {
           if(newButton.value == 1 && oldButton.value == 0) {
-            this.gamepad.forward = !this.gamepad.forward;
-            console.log(this.gamepad.forward)
+            this.gamepad.ch3 = !this.gamepad.ch3;
+            console.log(this.gamepad.ch3);
+
+            let payload =  "" + (this.gamepad.ch3 == true? 1 : 0);
+            let qos = 1;
+            // console.log(this.publish.payload);
+            let topic = "rcCar/" + this.rcCarID + "/control/ch3";
+            this.doPublish(topic, qos, payload);
           }
         }
       },
@@ -125,7 +133,7 @@ export default {
       this.gamepad.connect = false;
 
       this.publish.payload = '{"A":0,"B":1,"C":0,"D":0}';
-      this.publish.topic = "rcCar/" + this.rcCarID + "/control";
+      this.publish.topic = "rcCar/" + this.rcCarID + "/control/motor";
       this.doPublish();
     },
     //开启定时器获取按键信息
@@ -138,6 +146,13 @@ export default {
         for(let i = 0; i < this.gp.buttons.length; i++) {
           this.gamepad.buttons[this.gamepad.layout[i]] = this.gp.buttons[i];
         }
+        //LT刹车优先级高
+        if (this.gamepad.buttons["LT"].touched == true) {
+          this.gamepad.throttle = -this.gamepad.buttons["LT"].value / 2 + 0.5;
+        } else {
+          this.gamepad.throttle = this.gamepad.buttons["RT"].value / 2 + 0.5;
+        }
+
         //发送信息
         // this.publish.payload = "" + (this.gamepad.connect == true? 1:0) + "," +
         //                         (this.gamepad.axes[0].toFixed(2) * 100 + 100) + "," + 
@@ -157,19 +172,19 @@ export default {
         // this.publish.payload = buffer;
         if (this.publishOnTimes > 3) {
           this.publish.payload = JSON.stringify({
-            A: this.gamepad.connect == true? 1:0,
-            B: this.gamepad.forward == true? 1:0,
-            C: this.gamepad.axes[0].toFixed(3) * 1000 + 1000,
-            D: this.gamepad.buttons["RT"].value.toFixed(3) * 1000
+            "0": this.gamepad.connect == true? 1 : 0,
+            "1": this.gamepad.axes[0].toFixed(3) * 500 + 500,
+            "2": this.gamepad.throttle.toFixed(3) * 1000,
           })
           // console.log(this.publish.payload);
-          this.publish.topic = "rcCar/" + this.rcCarID + "/control";
-          this.doPublish();
+          this.publish.topic = "rcCar/" + this.rcCarID + "/control/motor";
+          this.publish.qos = 0;
+          this.doPublish(this.publish.topic, this.publish.qos, this.publish.payload);
           this.publishOnTimes = 0;
         } else {
           this.publishOnTimes++;
         }
-      }, 16);
+      }, 160);
     },
     initData() {
       this.client = {
@@ -229,8 +244,7 @@ export default {
         console.log('Subscribe to topics res', res)
       })
     },
-    doPublish() {
-      const { topic, qos, payload } = this.publish
+    doPublish(topic, qos, payload) {
       this.client.publish(topic, payload, { qos }, error => {
         if (error) {
           console.log('Publish error', error)

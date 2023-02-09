@@ -17,8 +17,8 @@
             <div class="status" :class="{ 'status-off': !gamepad.connect }"></div>
             <p class="info" >服务器连接状态:</p>
             <div class="status" :class="{ 'status-off': !gamepad.mqttConnected }"></div>
-            <p class="info" >前进:</p>
-            <div class="status" :class="{ 'status-off': !gamepad.forward }"></div>
+            <p class="info" >ch3:</p>
+            <div class="status" :class="{ 'status-off': !gamepad.ch3 }"></div>
         </div>
     </div>
 </template>
@@ -59,10 +59,10 @@ export default {
         },
         throttle() {
             var rt;
-            if(this.gamepad.buttons['RT'] !== undefined) {
-                rt = this.gamepad.buttons["RT"].value.toFixed(this.fixed) * 90;
+            if(this.gamepad.throttle !== undefined) {
+                rt = this.gamepad.throttle.toFixed(this.fixed) * 90;
             } else {
-                rt = 0;
+                rt = 45;
             }
             return rt;
         },
