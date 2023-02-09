@@ -45,6 +45,7 @@ Ticker ledTicker;
 bool LEDon = 0;
 //flag for saving data
 bool shouldSaveConfig = false;
+
 void setup() {
   Serial.begin(9600);               // 启动串口通讯
 
@@ -80,10 +81,10 @@ void setup() {
           if (json.containsKey("mqttServer")) strcpy(mqttServer, json["mqttServer"]);
           if (json.containsKey("mqttPort")) strcpy(mqttPort, json["mqttPort"]);
           if (json.containsKey("carName")) strcpy(carName, json["carName"]);
-          if (json.containsKey("directionCenter")) directionMin = json["directionMin"];
-          if (json.containsKey("directionCenter")) directionMax = json["directionMax"];
-          if (json.containsKey("directionCenter")) engineMin = json["engineMin"];
-          if (json.containsKey("engineCenter")) engineMax = json["engineMax"];
+          if (json.containsKey("directionMin")) directionMin = json["directionMin"];
+          if (json.containsKey("directionMax")) directionMax = json["directionMax"];
+          if (json.containsKey("engineMin")) engineMin = json["engineMin"];
+          if (json.containsKey("engineMax")) engineMax = json["engineMax"];
           if (json.containsKey("directionTrim")) directionTrim = json["directionTrim"];
           if (json.containsKey("engineTrim")) engineTrim = json["engineTrim"];
         } else {
@@ -104,9 +105,9 @@ void setup() {
   direction.attach(D1);
   engine.attach(D2);
   //设置为中位点
-  // direction.writeMicroseconds((directionMax - directionMin) / 2 + directionMin + directionTrim);
-  // engine.writeMicroseconds((engineMax - engineMin) / 2 + engineMin + engineTrim);
-  direction.write(90);
+  direction.writeMicroseconds((directionMax - directionMin) / 2 + directionMin + directionTrim);
+  engine.writeMicroseconds((engineMax - engineMin) / 2 + engineMin + engineTrim);
+  // direction.write(90);
   pinMode(ch3, OUTPUT);
   pinMode(ch4, OUTPUT);
 
@@ -140,11 +141,10 @@ void setup() {
   strcpy(mqttServer, custom_mqtt_server.getValue());
   strcpy(mqttPort, custom_mqtt_port.getValue());
   strcpy(carName, custom_car_name.getValue());
-
   Serial.println(mqttServer);
   Serial.println(strlen(mqttServer));
 
-  //保存配置
+  //保存配置-------------------------------------------------
   if (shouldSaveConfig) {
     Serial.println("saving config");
 #if defined(ARDUINOJSON_VERSION_MAJOR) && ARDUINOJSON_VERSION_MAJOR >= 6
@@ -176,9 +176,9 @@ void setup() {
   json.printTo(configFile);
 #endif
   configFile.close();
-  //end save
   }
-  
+  //结束保存-------------------------------------------------------------
+
   // 设置MQTT服务器和端口号
   mqttClient.setServer(mqttServer, 1883);
   mqttClient.setCallback(receiveCallback);
@@ -188,7 +188,7 @@ void setup() {
   connectMQTTserver();
 
   //看门狗，防止失控
-  ticker.attach(0.2, clearData);
+  ticker.attach(0.3, clearData);
 }
  
 void loop() {
@@ -198,22 +198,20 @@ void loop() {
     connectMQTTserver();        // 则尝试连接服务器
   }
 }
+
 //写入控制数据到电机
 void writeData() {
   if (ch[0] == 1) {
     direction.writeMicroseconds(ch[1] + directionTrim);
     engine.writeMicroseconds(ch[2] + engineTrim);
-    Serial.println("writeData\n");
     // analogWrite(engine, ch[2]);
     // digitalWrite(engine, HIGH);
-
-    
   } else {
     direction.writeMicroseconds((directionMax - directionMin) / 2 + directionMin + directionTrim);
     engine.writeMicroseconds((engineMax - engineMin) / 2 + engineMin + engineTrim);
   }
-  
 }
+
 // 收到信息后的回调函数
 void receiveCallback(char* topic, byte* payload, unsigned int length) {
   if (debug) {
@@ -237,15 +235,14 @@ void receiveCallback(char* topic, byte* payload, unsigned int length) {
       return;
     }
     ch[0] = (int)doc["0"]; // connect
-    ch[1] = map(doc[1], 0, 1000, directionMin, directionMax); // axes
-    ch[2] = map(doc[2], 0, 1000, engineMin, engineMax); // throttle 0~1000
+    ch[1] = map((int)doc["1"], 0, 1000, directionMin, directionMax); // axes
+    ch[2] = map((int)doc["2"], 0, 1000, engineMin, engineMax); // throttle 0~1000
 
     if (debug) {
       for (int i = 0; i < 3; i++) {
       Serial.println(ch[i]);
       }
     }
-
     writeData();
     //喂狗，防止清零
     clearFlag = 2;
@@ -255,8 +252,16 @@ void receiveCallback(char* topic, byte* payload, unsigned int length) {
     if (length > 0) {
       ch[3] = (int)payload[0] - (int)'0';
       Serial.println(ch[3]);
+      digitalWrite(ch3, ch[3]);
     }
-
+  }
+  //收到ch4主题时
+  if (strcmp(topic, String("rcCar/" + String(carName) + "/control/ch4").c_str()) == 0) {
+    if (length > 0) {
+      ch[4] = (int)payload[0] - (int)'0';
+      Serial.println(ch[4]);
+      digitalWrite(ch4, ch[4]);
+    }
   }
 }
 

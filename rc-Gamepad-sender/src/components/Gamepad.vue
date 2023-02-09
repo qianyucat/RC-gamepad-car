@@ -36,6 +36,7 @@ export default {
         ],
         throttle: 0.5,
         ch3: false,
+        ch4: false,
         mqttConnected: false
       },
       rcCarID: "rc-gamepad-car",
@@ -96,7 +97,14 @@ export default {
       handler(newButton, oldButton) {
         if(oldButton) {
           if(newButton.value == 1 && oldButton.value == 0) {
-            
+            this.gamepad.ch4 = !this.gamepad.ch4;
+            console.log(this.gamepad.ch4);
+
+            let payload =  "" + (this.gamepad.ch4 == true? 1 : 0);
+            let qos = 1;
+            // console.log(this.publish.payload);
+            let topic = "rcCar/" + this.rcCarID + "/control/ch4";
+            this.doPublish(topic, qos, payload);
           }
         }
       },
@@ -184,7 +192,7 @@ export default {
         } else {
           this.publishOnTimes++;
         }
-      }, 160);
+      }, 16);
     },
     initData() {
       this.client = {
