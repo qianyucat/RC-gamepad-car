@@ -11,8 +11,10 @@
 #include <WiFiManager.h>
 
 //设置项
-char mqttServer[40];
+char mqttServer[40] = "192.168.31.12";
 char mqttPort[6] = "1883";
+char mqttUser[20] = "rcCar";                //mqtt用户名
+char mqttPassword[20] = "rcCarPassword";    //mqtt密码
 char carName[16] = "rc-gamepad-car";       //设置不同的订阅主题，防止遥控串线
 
 int directionMin = 1000;
@@ -80,6 +82,8 @@ void setup() {
           Serial.println("\nparsed json");
           if (json.containsKey("mqttServer")) strcpy(mqttServer, json["mqttServer"]);
           if (json.containsKey("mqttPort")) strcpy(mqttPort, json["mqttPort"]);
+          if (json.containsKey("mqttUser")) strcpy(mqttUser, json["mqttUser"]);
+          if (json.containsKey("mqttPassword")) strcpy(mqttPassword, json["mqttPassword"]);
           if (json.containsKey("carName")) strcpy(carName, json["carName"]);
           if (json.containsKey("directionMin")) directionMin = json["directionMin"];
           if (json.containsKey("directionMax")) directionMax = json["directionMax"];
@@ -115,8 +119,10 @@ void setup() {
   // wifiManager.resetSettings();
   // id/name, placeholder/prompt, default, length
   // 添加配置项到ap配网页面
-  WiFiManagerParameter custom_mqtt_server("server", "mqtt server", mqttServer, 40);
-  WiFiManagerParameter custom_mqtt_port("port", "mqtt port", mqttPort, 5);
+  WiFiManagerParameter custom_mqtt_server("server", "mqtt server (192.168.1.10)", mqttServer, 40);
+  WiFiManagerParameter custom_mqtt_port("port", "mqtt port (1883)", mqttPort, 5);
+  WiFiManagerParameter custom_mqtt_user("mqttUser", "mqttUser", mqttUser, 20);
+  WiFiManagerParameter custom_mqtt_password("mqttPassword", "mqttPassword", mqttPassword, 20);
   WiFiManagerParameter custom_car_name("carName", "car name", carName, 16);
 
   //自动配网
@@ -126,6 +132,8 @@ void setup() {
   //添加参数
   wifiManager.addParameter(&custom_mqtt_server);
   wifiManager.addParameter(&custom_mqtt_port);
+  wifiManager.addParameter(&custom_mqtt_user);
+  wifiManager.addParameter(&custom_mqtt_password);
   wifiManager.addParameter(&custom_car_name);
   //连接WiFi
   if (!wifiManager.autoConnect("RC-Car-AP")) {
@@ -153,9 +161,13 @@ void setup() {
   DynamicJsonBuffer jsonBuffer;
   JsonObject& json = jsonBuffer.createObject();
 #endif
+  //MQTT服务器数据
   json["mqttServer"] = mqttServer;
   json["mqttPort"] = mqttPort;
+  json["mqttUser"] = mqttUser;
+  json["mqttPassword"] = mqttPassword;
   json["carName"] = carName;
+  //遥控车矫正数据
   json["directionMin"] = directionMin;
   json["directionMax"] = directionMax;
   json["engineMin"] = engineMin;
@@ -272,7 +284,7 @@ void connectMQTTserver(){
   String clientId = "rcCar-" + WiFi.macAddress();
  
   // 连接MQTT服务器
-  if (mqttClient.connect(clientId.c_str())) { 
+  if (mqttClient.connect(clientId.c_str(), mqttUser, mqttPassword)) { 
     Serial.println("MQTT Server Connected.");
     Serial.println("Server Address:");
     Serial.println(mqttServer);
