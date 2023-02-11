@@ -12,21 +12,29 @@
             <div class="button B" :class="{ pressed: isPressB }">B</div>
             <div class="button A" :class="{ pressed: isPressA }">A</div>
         </div>
-        <div class="status-Bar" :style="{ width: controlPadWidth * 0.8 + 'px', height: '50px', fontSize: width / 50 + 'px'}">
-            <p class="info" >手柄连接状态:</p>
-            <div class="status" :class="{ 'status-off': !gamepad.connect }"></div>
+        <div class="status-Bar" :style="{ width: controlPadWidth * 0.8 + 'px', height: '50px', fontSize: width / 50 + 'px'}">  
             <p class="info" >服务器连接状态:</p>
             <div class="status" :class="{ 'status-off': !gamepad.mqttConnected }"></div>
+            <p class="info" >手柄连接状态:</p>
+            <div class="status" :class="{ 'status-off': !gamepad.connect }"></div>
             <p class="info" >ch3:</p>
             <div class="status" :class="{ 'status-off': !gamepad.ch3 }"></div>
+            <p class="info" >ch4:</p>
+            <div class="status" :class="{ 'status-off': !gamepad.ch4 }"></div>
+            <config :configData="configData" @config-data-Change="sendconfigData"></config>
         </div>
     </div>
 </template>
 
 <script>
+import config from "./config.vue"
 export default {
     name: 'Gamepad',
-    props : ["gamepad", "mqttConnect"],
+    components: {
+        config
+    },
+    props : ["gamepad", "configData"],
+    emits: ['configDataChange'],
     data() {
         return {
             width: 800,
@@ -105,7 +113,10 @@ export default {
             
     },
     methods: {
-
+        sendconfigData(data) {
+            console.log(data)
+            this.$emit('configDataChange', data)
+        }
     },
     mounted() {
         window.onresize = () => {
@@ -181,10 +192,12 @@ export default {
 }
 .status-Bar {
     position: absolute;
-    left: 22%; top: 5%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    left: 10%; top: 5%;
 }
 .status {
-    float: left;
     width: 10px; height:10px;
     margin:20px 30px 20px 10px;
     background-color:rgba(51, 204, 51, 0.906);
@@ -194,7 +207,6 @@ export default {
     background-color: rgb(240, 0, 12);
 }
 .info {
-    float: left;
     line-height:50px;
     color: rgb(0, 0, 0,0.7);
 }

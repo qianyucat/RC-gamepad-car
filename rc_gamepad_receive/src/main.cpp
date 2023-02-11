@@ -17,12 +17,11 @@ char mqttUser[20] = "rcCar";                //mqtt用户名
 char mqttPassword[20] = "rcCarPassword";    //mqtt密码
 char carName[16] = "rc-gamepad-car";       //设置不同的订阅主题，防止遥控串线
 
-int directionMin = 1000;
 int directionMax = 2000;
-int engineMin = 1000;
 int engineMax = 2000;
 int directionTrim = 0;
 int engineTrim = 0;
+
 //是否启动调试模式
 bool debug = false;
  
@@ -39,7 +38,7 @@ const uint8_t ch4 = D4;
 //接受控制参数
 uint16 ch[4] = {0, 0, 0, 0};
 //json解析
-StaticJsonDocument<64> doc;
+
 
 Ticker ticker;
 int clearFlag = 2;
@@ -55,48 +54,7 @@ void setup() {
   Serial.println("mounting FS...");
 
   if (SPIFFS.begin()) {
-    Serial.println("mounted file system");
-    if (SPIFFS.exists("/config.json")) {
-      //file exists, reading and loading
-      Serial.println("reading config file");
-      File configFile = SPIFFS.open("/config.json", "r");
-      if (configFile) {
-        Serial.println("opened config file");
-        size_t size = configFile.size();
-        // Allocate a buffer to store contents of the file.
-        std::unique_ptr<char[]> buf(new char[size]);
-
-        configFile.readBytes(buf.get(), size);
-
- #if defined(ARDUINOJSON_VERSION_MAJOR) && ARDUINOJSON_VERSION_MAJOR >= 6
-        DynamicJsonDocument json(1024);
-        auto deserializeError = deserializeJson(json, buf.get());
-        serializeJson(json, Serial);
-        if ( ! deserializeError ) {
-#else
-        DynamicJsonBuffer jsonBuffer;
-        JsonObject& json = jsonBuffer.parseObject(buf.get());
-        json.printTo(Serial);
-        if (json.success()) {
-#endif
-          Serial.println("\nparsed json");
-          if (json.containsKey("mqttServer")) strcpy(mqttServer, json["mqttServer"]);
-          if (json.containsKey("mqttPort")) strcpy(mqttPort, json["mqttPort"]);
-          if (json.containsKey("mqttUser")) strcpy(mqttUser, json["mqttUser"]);
-          if (json.containsKey("mqttPassword")) strcpy(mqttPassword, json["mqttPassword"]);
-          if (json.containsKey("carName")) strcpy(carName, json["carName"]);
-          if (json.containsKey("directionMin")) directionMin = json["directionMin"];
-          if (json.containsKey("directionMax")) directionMax = json["directionMax"];
-          if (json.containsKey("engineMin")) engineMin = json["engineMin"];
-          if (json.containsKey("engineMax")) engineMax = json["engineMax"];
-          if (json.containsKey("directionTrim")) directionTrim = json["directionTrim"];
-          if (json.containsKey("engineTrim")) engineTrim = json["engineTrim"];
-        } else {
-          Serial.println("failed to load json config");
-        }
-        configFile.close();
-      }
-    }
+    readConfig();
   } else {
     Serial.println("failed to mount FS");
   }
@@ -109,8 +67,8 @@ void setup() {
   direction.attach(D1);
   engine.attach(D2);
   //设置为中位点
-  direction.writeMicroseconds((directionMax - directionMin) / 2 + directionMin + directionTrim);
-  engine.writeMicroseconds((engineMax - engineMin) / 2 + engineMin + engineTrim);
+  direction.writeMicroseconds(1500 + directionTrim);
+  engine.writeMicroseconds(1500 + engineTrim);
   // direction.write(90);
   pinMode(ch3, OUTPUT);
   pinMode(ch4, OUTPUT);
@@ -153,41 +111,26 @@ void setup() {
   Serial.println(strlen(mqttServer));
 
   //保存配置-------------------------------------------------
-  if (shouldSaveConfig) {
-    Serial.println("saving config");
 #if defined(ARDUINOJSON_VERSION_MAJOR) && ARDUINOJSON_VERSION_MAJOR >= 6
-  DynamicJsonDocument json(1024);
+  DynamicJsonDocument doc(256);
 #else
   DynamicJsonBuffer jsonBuffer;
-  JsonObject& json = jsonBuffer.createObject();
+  JsonObject& doc = jsonBuffer.createObject();
 #endif
   //MQTT服务器数据
-  json["mqttServer"] = mqttServer;
-  json["mqttPort"] = mqttPort;
-  json["mqttUser"] = mqttUser;
-  json["mqttPassword"] = mqttPassword;
-  json["carName"] = carName;
+  doc["server"] = mqttServer;
+  doc["port"] = mqttPort;
+  doc["user"] = mqttUser;
+  doc["password"] = mqttPassword;
+  doc["carName"] = carName;
   //遥控车矫正数据
-  json["directionMin"] = directionMin;
-  json["directionMax"] = directionMax;
-  json["engineMin"] = engineMin;
-  json["engineMax"] = engineMax;
-  json["directionTrim"] = directionTrim;
-  json["engineTrim"] = engineTrim;
+  doc["dMax"] = directionMax;
+  doc["eMax"] = engineMax;
+  doc["dTrim"] = directionTrim;
+  doc["eTrim"] = engineTrim;
 
-  File configFile = SPIFFS.open("/config.json", "w");
-  if (!configFile) {
-    Serial.println("failed to open config file for writing");
-  }
-
-#if defined(ARDUINOJSON_VERSION_MAJOR) && ARDUINOJSON_VERSION_MAJOR >= 6
-  serializeJson(json, Serial);
-  serializeJson(json, configFile);
-#else
-  json.printTo(Serial);
-  json.printTo(configFile);
-#endif
-  configFile.close();
+  if (shouldSaveConfig) {
+    saveConfig(doc);
   }
   //结束保存-------------------------------------------------------------
 
@@ -219,8 +162,8 @@ void writeData() {
     // analogWrite(engine, ch[2]);
     // digitalWrite(engine, HIGH);
   } else {
-    direction.writeMicroseconds((directionMax - directionMin) / 2 + directionMin + directionTrim);
-    engine.writeMicroseconds((engineMax - engineMin) / 2 + engineMin + engineTrim);
+    direction.writeMicroseconds(1500 + directionTrim);
+    engine.writeMicroseconds(1500 + engineTrim);
   }
 }
 
@@ -240,15 +183,16 @@ void receiveCallback(char* topic, byte* payload, unsigned int length) {
   //收到motor主题时
   if (strcmp(topic, String("rcCar/" + String(carName) + "/control/motor").c_str()) == 0) {
     //从JSON中读取控制数据
-    DeserializationError error = deserializeJson(doc, payload, length);
+    StaticJsonDocument<56> controlDoc;
+    DeserializationError error = deserializeJson(controlDoc, payload, length);
     if (error) {
       Serial.print(F("deserializeJson() failed: "));
       Serial.println(error.f_str());
       return;
     }
-    ch[0] = (int)doc["0"]; // connect
-    ch[1] = map((int)doc["1"], 0, 1000, directionMin, directionMax); // axes
-    ch[2] = map((int)doc["2"], 0, 1000, engineMin, engineMax); // throttle 0~1000
+    ch[0] = (int)controlDoc["0"]; // connect
+    ch[1] = map((int)controlDoc["1"], 0, 1000, 3000 - directionMax, directionMax); // axes
+    ch[2] = map((int)controlDoc["2"], 0, 1000, 3000 - engineMax, engineMax); // throttle 0~1000
 
     if (debug) {
       for (int i = 0; i < 3; i++) {
@@ -273,6 +217,52 @@ void receiveCallback(char* topic, byte* payload, unsigned int length) {
       ch[4] = (int)payload[0] - (int)'0';
       Serial.println(ch[4]);
       digitalWrite(ch4, ch[4]);
+    }
+  }
+  //收到newConfig主题时
+  if (strcmp(topic, String("rcCar/" + String(carName) + "/config/newConfig").c_str()) == 0) {
+    //从JSON中读取设置数据
+    DynamicJsonDocument json(256);
+    DeserializationError error = deserializeJson(json, payload, length);
+    if (error) {
+      Serial.print(F("deserializeJson() failed: "));
+      Serial.println(error.f_str());
+      return;
+    }
+    if (json.containsKey("server")) strcpy(mqttServer, json["server"]);
+    if (json.containsKey("port")) strcpy(mqttPort, json["port"]);
+    if (json.containsKey("user")) strcpy(mqttUser, json["user"]);
+    if (json.containsKey("password")) strcpy(mqttPassword, json["password"]);
+    if (json.containsKey("carName")) strcpy(carName, json["carName"]);
+    if (json.containsKey("dMax")) directionMax = json["dMax"];
+    if (json.containsKey("eMax")) engineMax = json["eMax"];
+    if (json.containsKey("dTrim")) directionTrim = json["dTrim"];
+    if (json.containsKey("eTrim")) engineTrim = json["eTrim"];
+    if(saveConfig(json)) mqttClient.publish(String("rcCar/" + String(carName) + "/config/saved").c_str(), "1");
+    else mqttClient.publish(String("rcCar/" + String(carName) + "/config/saved").c_str(), "0");
+  }
+  //收到getConfig主题时
+  if (strcmp(topic, String("rcCar/" + String(carName) + "/config/getConfig").c_str()) == 0) {
+    StaticJsonDocument<256> doc;
+
+    doc["server"] = mqttServer;
+    doc["port"] = mqttPort;
+    doc["user"] = mqttUser;
+    doc["password"] = mqttPassword;
+    doc["carName"] = carName;
+    doc["dMax"] = directionMax;
+    doc["eMax"] = engineMax;
+    doc["dTrim"] = directionTrim;
+    doc["eTrim"] = engineTrim;
+
+    String output = String("");
+    serializeJson(doc, output);
+
+    //发送carConfig
+    if(mqttClient.publish(String("rcCar/" + String(carName) + "/config/carConfig").c_str(), output.c_str())){
+      Serial.println("Publish Topic:/config/carConfig"); 
+    } else {
+      Serial.println("Message Publish Failed."); 
     }
   }
 }
@@ -304,7 +294,7 @@ void connectMQTTserver(){
 // 订阅指定主题
 void subscribeTopic(){
  
-  // 建立订阅主题1。主题名称以Taichi-Maker-Sub为前缀，后面添加设备的MAC地址。
+  // 建立订阅主题1
   // 这么做是为确保不同设备使用同一个MQTT服务器测试消息订阅时，所订阅的主题名称不同
   String topicString = "rcCar/" + String(carName) + "/control/+";
   char subTopic[topicString.length() + 1];  
@@ -316,7 +306,19 @@ void subscribeTopic(){
     Serial.println(subTopic);
   } else {
     Serial.print("Subscribe Fail...");
-  }  
+  }
+
+  String topicString2 = "rcCar/" + String(carName) + "/config/+";
+  char subTopic2[topicString2.length() + 1];  
+  strcpy(subTopic2, topicString2.c_str());
+  
+  // 通过串口监视器输出是否成功订阅主题1以及订阅的主题1名称
+  if(mqttClient.subscribe(subTopic2)){
+    Serial.println("Subscrib Topic:");
+    Serial.println(subTopic2);
+  } else {
+    Serial.print("Subscribe Fail...");
+  }
 }
  
 // ESP8266连接wifi
@@ -350,5 +352,67 @@ void saveConfigCallback() {
 void blinkLED() {
   LEDon = !LEDon;
   digitalWrite(LED_BUILTIN, LEDon);
+}
+
+bool saveConfig(DynamicJsonDocument json) {
+  Serial.println("saving config");
+  File configFile = SPIFFS.open("/config.json", "w");
+  if (!configFile) {
+    Serial.println("failed to open config file for writing");
+    return false;
+  }
+
+#if defined(ARDUINOJSON_VERSION_MAJOR) && ARDUINOJSON_VERSION_MAJOR >= 6
+  // serializeJson(json, Serial);
+  serializeJson(json, configFile);
+#else
+  json.printTo(Serial);
+  json.printTo(configFile);
+#endif
+  configFile.close();
+  return true;
+}
+
+void readConfig() {
+  Serial.println("mounted file system");
+    if (SPIFFS.exists("/config.json")) {
+      //file exists, reading and loading
+      Serial.println("reading config file");
+      File configFile = SPIFFS.open("/config.json", "r");
+      if (configFile) {
+        Serial.println("opened config file");
+        size_t size = configFile.size();
+        // Allocate a buffer to store contents of the file.
+        std::unique_ptr<char[]> buf(new char[size]);
+
+        configFile.readBytes(buf.get(), size);
+
+ #if defined(ARDUINOJSON_VERSION_MAJOR) && ARDUINOJSON_VERSION_MAJOR >= 6
+        DynamicJsonDocument json(256);
+        auto deserializeError = deserializeJson(json, buf.get());
+        serializeJson(json, Serial);
+        if ( ! deserializeError ) {
+#else
+        DynamicJsonBuffer jsonBuffer;
+        JsonObject& json = jsonBuffer.parseObject(buf.get());
+        json.printTo(Serial);
+        if (json.success()) {
+#endif
+          Serial.println("\nparsed json");
+          if (json.containsKey("server")) strcpy(mqttServer, json["server"]);
+          if (json.containsKey("port")) strcpy(mqttPort, json["port"]);
+          if (json.containsKey("user")) strcpy(mqttUser, json["user"]);
+          if (json.containsKey("password")) strcpy(mqttPassword, json["password"]);
+          if (json.containsKey("carName")) strcpy(carName, json["carName"]);
+          if (json.containsKey("dMax")) directionMax = json["dMax"];
+          if (json.containsKey("eMax")) engineMax = json["eMax"];
+          if (json.containsKey("dTrim")) directionTrim = json["dTrim"];
+          if (json.containsKey("eTrim")) engineTrim = json["eTrim"];
+        } else {
+          Serial.println("failed to load json config");
+        }
+        configFile.close();
+      }
+    }
 }
 

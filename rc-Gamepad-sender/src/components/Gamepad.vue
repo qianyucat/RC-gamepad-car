@@ -1,5 +1,5 @@
 <template>
-    <xbox :gamepad="gamepad"></xbox>
+  <xbox :gamepad="gamepad" :configData="configData" @config-data-change="sendConfigData"></xbox>
   <ul>
     <li v-for="(value, key) in gamepad.axes">
       {{ key }}: {{ value }}
@@ -12,10 +12,10 @@
     </li>
     {{ gamepad.throttle }}
   </ul>
-
 </template>
 <script>
 import xbox from "./xbox.vue"
+
 export default {
   name: 'Gamepad',
   components: {
@@ -39,10 +39,20 @@ export default {
         ch4: false,
         mqttConnected: false
       },
-      rcCarID: "rc-gamepad-car",
+      configData: {
+        server: "192.168.31.12",
+        port: "1883",
+        user: "",
+        password: "",
+        carName: "rc-gamepad-car",
+        dMax: 2000,
+        eMax: 2000,
+        dTrim: 0,
+        eTrim:0
+      },
       connection: {
         protocol: "ws",
-        host: "192.168.31.12",
+        host: "qianyucat.top",
         // ws: 8083; wss: 8084
         port: 8083,
         endpoint: "/mqtt",
@@ -55,16 +65,12 @@ export default {
         // username: "emqx_test",
         // password: "emqx_test",
       },
-      subscription: {
-        topic: "topic/mqttx",
-        qos: 0,
-      },
+      subscriptions: [],
       publish: {
         topic: "topic/browser",
         qos: 0,
         payload: '{ "A": 0, "B": 1, "C": 0, "D": 0 }',
       },
-      receiveNews: "",
       qosList: [0, 1, 2],
       client: {
         connected: false,
@@ -72,7 +78,7 @@ export default {
       subscribeSuccess: false,
       connecting: false,
       retryTimes: 0,
-      publishOnTimes: 0
+      publishOnTimes: 0,
     }
   },
   watch: {
@@ -87,7 +93,7 @@ export default {
             let payload =  "" + (this.gamepad.ch3 == true? 1 : 0);
             let qos = 1;
             // console.log(this.publish.payload);
-            let topic = "rcCar/" + this.rcCarID + "/control/ch3";
+            let topic = "rcCar/" + this.configData.carName + "/control/ch3";
             this.doPublish(topic, qos, payload);
           }
         }
@@ -103,7 +109,7 @@ export default {
             let payload =  "" + (this.gamepad.ch4 == true? 1 : 0);
             let qos = 1;
             // console.log(this.publish.payload);
-            let topic = "rcCar/" + this.rcCarID + "/control/ch4";
+            let topic = "rcCar/" + this.configData.carName + "/control/ch4";
             this.doPublish(topic, qos, payload);
           }
         }
@@ -141,7 +147,7 @@ export default {
       this.gamepad.connect = false;
 
       this.publish.payload = '{"A":0,"B":1,"C":0,"D":0}';
-      this.publish.topic = "rcCar/" + this.rcCarID + "/control/motor";
+      this.publish.topic = "rcCar/" + this.configData.carName + "/control/motor";
       this.doPublish();
     },
     //开启定时器获取按键信息
@@ -185,14 +191,28 @@ export default {
             "2": this.gamepad.throttle.toFixed(3) * 1000,
           })
           // console.log(this.publish.payload);
-          this.publish.topic = "rcCar/" + this.rcCarID + "/control/motor";
+          this.publish.topic = "rcCar/" + this.configData.carName + "/control/motor";
           this.publish.qos = 0;
           this.doPublish(this.publish.topic, this.publish.qos, this.publish.payload);
           this.publishOnTimes = 0;
         } else {
           this.publishOnTimes++;
         }
-      }, 16);
+      }, 160);
+    },
+    sendConfigData(data) {
+      this.configData = data;
+      let payload = JSON.stringify(this.configData);
+      console.log(payload);
+      let qos = 0;
+      let topic = "rcCar/" + this.configData.carName + "/config/newConfig";
+      this.doPublish(topic, qos, payload);
+    },
+    getConfigData() {
+      let payload = '';
+      let qos = 0;
+      let topic = "rcCar/" + this.configData.carName + "/config/getConfig"
+      this.doPublish(topic, qos, payload);
     },
     initData() {
       this.client = {
@@ -232,8 +252,18 @@ export default {
             console.log("Connection failed", error);
           });
           this.client.on("message", (topic, message) => {
-            this.receiveNews = this.receiveNews.concat(message);
             console.log(`Received message ${message} from topic ${topic}`);
+            if (topic == "rcCar/" + this.configData.carName + "/config/carConfig") {
+              this.configData = JSON.parse(message);
+              console.log(this.configData);
+            }
+            if (topic == "rcCar/" + this.configData.carName + "/config/saved") {
+              if (message == "1") {
+                console.log("修改成功")
+              } else {
+                console.log("修改成功")
+              }
+            }
           });
         }
       } catch (error) {
@@ -242,14 +272,14 @@ export default {
       }
     },
     doSubscribe() {
-      const { topic, qos } = this.subscription
-      this.client.subscribe(topic, { qos }, (error, res) => {
-        if (error) {
-          console.log('Subscribe to topics error', error)
-          return
-        }
-        this.subscribeSuccess = true
-        console.log('Subscribe to topics res', res)
+      this.subscriptions.forEach(subscription => {
+        this.client.subscribe(subscription.topic, subscription.qos , (error, res) => {
+          if (error) {
+            console.log('Subscribe to topics error', error)
+            return
+          }
+          console.log('Subscribe to topics res', res)
+        })
       })
     },
     doPublish(topic, qos, payload) {
@@ -285,6 +315,16 @@ export default {
     window.addEventListener("gamepadconnected", this.connecthandler);
     window.addEventListener("gamepaddisconnected", this.disconnecthandler);
     this.createConnection();
+    this.subscriptions = [{
+          topic: "rcCar/" + this.configData.carName + "/config/carConfig",
+          qos: 0,
+        },
+        {
+          topic: "rcCar/" + this.configData.carName + "/config/saved",
+          qos: 0,
+        }]
+    this.doSubscribe();
+    this.getConfigData();
   }
 }
 </script>
